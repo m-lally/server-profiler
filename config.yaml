@@ -1,0 +1,94 @@
+# Server Profiler Configuration
+# Override default settings here
+
+# SSH Configuration
+ssh:
+  default_port: 22
+  connection_timeout: 10
+  command_timeout: 30
+
+# Profiling Settings
+profiling:
+  # Skip certain profile sections (for faster profiling)
+  skip:
+    - cron_jobs    # Set to true to skip cron job discovery
+    - packages     # Set to true to skip package listing (can be slow)
+  
+  # Maximum packages to include in profile (most common ones)
+  max_packages: 100
+  
+  # Detect specific software
+  detect_software:
+    - nginx
+    - apache2
+    - mysql
+    - postgresql
+    - redis
+    - mongodb
+    - docker
+    - python
+    - node
+    - php
+    - ruby
+    - go
+    - rust
+
+# Terraform Generation
+terraform:
+  # Default AWS region
+  default_region: us-east-1
+  
+  # Default instance settings
+  instance:
+    use_static_ip: true
+    backup_enabled: false
+  
+  # Include these configuration files in Terraform
+  include_configs:
+    - /etc/nginx/nginx.conf
+    - /etc/apache2/apache2.conf
+    - /etc/mysql/my.cnf
+  
+  # Firewall rules to always include
+  default_firewall_rules:
+    - port: 22
+      protocol: tcp
+      description: SSH
+    - port: 80
+      protocol: tcp
+      description: HTTP
+    - port: 443
+      protocol: tcp
+      description: HTTPS
+
+# Output Settings
+output:
+  profile_file: profile.json
+  terraform_dir: terraform
+  
+  # Pretty print JSON
+  json_indent: 2
+  
+  # Verbosity level (0-3)
+  verbosity: 1
+
+# Lightsail Specific
+lightsail:
+  # Default SSH config path
+  ssh_config_path: ~/.ssh/lightsail-ssh-config
+  
+  # Bundle ID mappings (memory in MB -> bundle)
+  bundles:
+    512: nano_3_0
+    1024: micro_3_0
+    2048: small_3_0
+    4096: medium_3_0
+    8192: large_3_0
+    16384: xlarge_3_0
+  
+  # Blueprint ID mappings
+  blueprints:
+    debian_11: debian_11
+    debian_12: debian_12
+    ubuntu_20_04: ubuntu_20_04
+    ubuntu_22_04: ubuntu_22_04
