@@ -6,16 +6,13 @@ A CLI tool to profile remote servers and generate Terraform configuration.
 """
 import json
 import sys
-from pathlib import Path
 
 import click
+import rich_click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-from rich.columns import Columns
 from rich import box
-from rich.syntax import Syntax
 
 from ssh_connector import SSHConnector, parse_lightsail_config
 from server_profiler import ServerProfiler
@@ -24,6 +21,19 @@ from terraform_generator import TerraformGenerator
 VERSION = "0.2.0"
 
 console = Console()
+
+rich_click.USE_RICH_MARKUP = True
+rich_click.STYLE_OPTIONS_PANEL_BORDER = "cyan"
+rich_click.STYLE_COMMANDS_PANEL_BORDER = "green"
+rich_click.STYLE_OPTION = "bold cyan"
+rich_click.STYLE_OPTION_DEFAULT = "dim"
+rich_click.STYLE_USAGE = "bold yellow"
+rich_click.STYLE_HEADER = "bold cyan"
+rich_click.STYLE_HELPTEXT_FIRST_LINE = "bold"
+rich_click.WIDTH = 90
+rich_click.SHOW_METAVARS_COLUMN = True
+rich_click.APPEND_METAVARS_HELP = True
+rich_click.GROUP_ARGUMENTS_OPTIONAL = True
 
 
 def show_splash():
@@ -100,35 +110,90 @@ def build_profile_dict(output_file: str) -> dict:
         sys.exit(1)
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+EPILOG_ROOT = """
+Examples:
+
+    server-profiler profile --host 54.123.45.67 --user admin --key ~/.ssh/id_rsa
+    server-profiler profile --lightsail-config ~/.ssh/lightsail --instance-name my-server --no-terraform
+    server-profiler terraform -i profile.json
+    server-profiler --version
+"""
+
+EPILOG_PROFILE = """
+Examples:
+
+    # Direct SSH connection
+    server-profiler profile --host example.com --user admin --key ~/.ssh/id_rsa
+
+    # Using AWS Lightsail SSH config
+    server-profiler profile --lightsail-config ~/.ssh/lightsail-ssh-config --instance-name my-server
+
+    # Profile only, skip Terraform generation
+    server-profiler profile --host example.com --key ~/.ssh/id_rsa --no-terraform --output server.json
+
+    # Custom port and verbose output
+    server-profiler profile --host 10.0.1.100 --user ubuntu --key ~/.ssh/key.pem --port 2222 -v
+
+Output files:
+
+    profile.json               Complete server profile (JSON)
+    terraform/main.tf          Lightsail instance and networking config
+    terraform/variables.tf     Configurable Terraform variables
+    terraform/provisioner.tf   Remote-exec provisioning
+    terraform/outputs.tf       Instance output definitions
+    terraform/startup.sh       User data bootstrap script
+"""
+
+EPILOG_TERRAFORM = """
+Examples:
+
+    server-profiler terraform                              (default profile.json)
+    server-profiler terraform -i backups/prod-server.json  (custom input)
+    server-profiler terraform -i profile.json --terraform-dir ./infra/terraform
+"""
+
+
+@click.group(cls=rich_click.RichGroup, context_settings={"help_option_names": ["-h", "--help"]}, epilog=EPILOG_ROOT)
 @click.version_option(version=VERSION, prog_name="server-profiler", message="%(prog)s v%(version)s")
 def cli():
     """Server Profiler & Terraform Generator
 
-    Profile remote servers and generate Terraform infrastructure-as-code.
+    Profile remote servers and generate Terraform infrastructure-as-code
+    to recreate them on AWS Lightsail.
     """
 
 
-@cli.command()
-@click.option("--host", help="Remote server hostname or IP")
-@click.option("--user", default="admin", show_default=True, help="SSH username")
-@click.option("--key", help="Path to SSH private key file")
-@click.option("--password", help="SSH password (if not using key)")
-@click.option("--port", default=22, type=int, show_default=True, help="SSH port")
-@click.option("--lightsail-config", help="Path to Lightsail SSH config file")
-@click.option("--instance-name", help="Instance name in Lightsail config")
-@click.option("--terraform/--no-terraform", default=True, help="Generate Terraform configuration")
-@click.option("--output", default="profile.json", show_default=True, help="Output file for profile")
-@click.option("--terraform-dir", default="terraform", show_default=True, help="Directory for Terraform files")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed progress")
+@cli.command(epilog=EPILOG_PROFILE)
+@click.option("--host", help="Remote server [cyan]hostname[/cyan] or [cyan]IP address[/cyan] to connect to")
+@click.option("--user", default="admin", show_default=True,
+              help="[cyan]SSH username[/cyan] for the remote connection")
+@click.option("--key", help="Path to [cyan]SSH private key[/cyan] file (e.g. [i]~/.ssh/id_rsa[/i])")
+@click.option("--password", help="[cyan]SSH password[/cyan] for authentication (alternative to --key)")
+@click.option("--port", default=22, type=int, show_default=True,
+              help="[cyan]SSH port number[/cyan]")
+@click.option("--lightsail-config",
+              help="Path to [cyan]AWS Lightsail SSH config[/cyan] file (alternative to --host)")
+@click.option("--instance-name",
+              help="[cyan]Instance name[/cyan] in Lightsail config file (used with --lightsail-config)")
+@click.option("--terraform/--no-terraform", default=True,
+              help="Enable or disable [cyan]Terraform[/cyan] configuration generation")
+@click.option("--output", default="profile.json", show_default=True,
+              help="Path to write the server [cyan]profile JSON[/cyan] output")
+@click.option("--terraform-dir", default="terraform", show_default=True,
+              help="Directory to write generated [cyan]Terraform[/cyan] files into")
+@click.option("--verbose", "-v", is_flag=True,
+              help="Show [cyan]detailed profiling progress[/cyan] for each step")
 def profile(host, user, key, password, port, lightsail_config, instance_name,
             terraform, output, terraform_dir, verbose):
     """Profile a remote server over SSH.
 
-    Connects to a remote server, profiles its system configuration (OS,
-    hardware, network, packages, services, firewall, storage, users,
-    cron jobs, and installed software), then optionally generates
-    Terraform configuration to recreate it on AWS Lightsail.
+    Connects to a remote server and collects system configuration:
+    operating system, hardware specs, network configuration, installed
+    packages, running services, firewall rules, storage, user accounts,
+    cron jobs, and detected software.
+
+    Optionally generates Terraform configuration to recreate the server
+    as an AWS Lightsail instance.
     """
     show_splash()
 
@@ -207,17 +272,20 @@ def profile(host, user, key, password, port, lightsail_config, instance_name,
         sys.exit(1)
 
 
-@cli.command()
+@cli.command(epilog=EPILOG_TERRAFORM)
 @click.option("--input", "-i", "input_file", default="profile.json", show_default=True,
-              help="Input profile JSON file")
+              help="Path to an existing server [cyan]profile JSON[/cyan] file to load")
 @click.option("--terraform-dir", default="terraform", show_default=True,
-              help="Directory for Terraform files")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed progress")
+              help="Directory to write the generated [cyan]Terraform[/cyan] files into")
+@click.option("--verbose", "-v", is_flag=True,
+              help="Show [cyan]detailed progress[/cyan] during Terraform file generation")
 def terraform(input_file, terraform_dir, verbose):
     """Generate Terraform from an existing profile.
 
-    Takes a previously generated profile.json and recreates
-    the Terraform configuration files without re-profiling.
+    Takes a previously generated profile.json and recreates the
+    Terraform configuration files (main.tf, variables.tf,
+    provisioner.tf, outputs.tf, startup.sh) without needing to
+    re-profile the server. Useful for iterating on IaC output.
     """
     profile_data = build_profile_dict(input_file)
 
