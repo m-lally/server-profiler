@@ -1,7 +1,26 @@
 [project]
 name = "server-profiler"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Remote server profiler and Terraform generator"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "click>=8.1.7",
+    "rich>=13.7.0",
+    "paramiko>=3.4.0",
+    "jinja2>=3.1.3",
+    "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+server-profiler = "profiler:cli"
+
+[tool.setuptools]
+packages = []
+py-modules = ["profiler", "ssh_connector", "server_profiler", "terraform_generator"]

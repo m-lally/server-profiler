@@ -2,58 +2,65 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
 from jinja2 import Template
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 
 class TerraformGenerator:
     """Generates Terraform configuration from server profile."""
-    
-    def __init__(self, profile: Dict[str, Any], output_dir: str = 'terraform'):
+
+    def __init__(self, profile: Dict[str, Any], output_dir: str = 'terraform',
+                 console: Optional[Console] = None):
         """
         Initialize Terraform generator.
-        
+
         Args:
             profile: Server profile dictionary
             output_dir: Directory to write Terraform files
+            console: Rich console for output
         """
         self.profile = profile
         self.output_dir = Path(output_dir)
+        self.console = console or Console()
         self.output_dir.mkdir(exist_ok=True)
-    
+
     def generate_all(self):
         """Generate all Terraform configuration files."""
-        print("\n🏗️  Generating Terraform configuration...")
-        
-        self.generate_main_tf()
-        print("  ✓ main.tf")
-        
-        self.generate_variables_tf()
-        print("  ✓ variables.tf")
-        
-        self.generate_provisioner_tf()
-        print("  ✓ provisioner.tf")
-        
-        self.generate_outputs_tf()
-        print("  ✓ outputs.tf")
-        
-        self.generate_startup_script()
-        print("  ✓ startup.sh")
-        
-        print(f"\n✅ Terraform configuration generated in {self.output_dir}/")
-    
+        self.console.print("[bold cyan]⟐ Generating Terraform configuration...[/bold cyan]")
+
+        steps = [
+            ("main.tf", self.generate_main_tf),
+            ("variables.tf", self.generate_variables_tf),
+            ("provisioner.tf", self.generate_provisioner_tf),
+            ("outputs.tf", self.generate_outputs_tf),
+            ("startup.sh", self.generate_startup_script),
+        ]
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True,
+        ) as progress:
+            for label, method in steps:
+                task = progress.add_task(f"[cyan]{label}...", total=None)
+                method()
+                progress.update(task, description=f"[green]✓[/green] {label}")
+
+        self.console.print(f"\n[bold green]✓[/bold green] Terraform configuration generated in "
+                           f"[cyan]{self.output_dir}/[/cyan]")
+
     def generate_main_tf(self):
         """Generate main.tf with Lightsail instance configuration."""
         os_info = self.profile.get('os_info', {})
         hardware = self.profile.get('hardware', {})
-        
-        # Map memory to Lightsail bundle
+
         memory_mb = hardware.get('memory_mb', 512)
         bundle_id = self._get_lightsail_bundle(memory_mb)
-        
-        # Get availability zone from network info
-        region = 'us-east-1'  # Default
-        
+
         template = Template('''# Terraform configuration for AWS Lightsail instance
 # Auto-generated from server profile
 
@@ -75,10 +82,10 @@ resource "aws_lightsail_instance" "server" {
   availability_zone = "${var.aws_region}a"
   blueprint_id      = var.blueprint_id  # {{ os_name }}
   bundle_id         = var.bundle_id     # {{ memory_mb }}MB RAM, {{ cpu_cores }} vCPU
-  
+
   # User data script for initial setup
   user_data = file("${path.module}/startup.sh")
-  
+
   tags = {
     Name        = var.instance_name
     Environment = var.environment
@@ -113,7 +120,7 @@ resource "aws_lightsail_static_ip_attachment" "server" {
   instance_name  = aws_lightsail_instance.server.name
 }
 ''')
-        
+
         content = template.render(
             os_name=os_info.get('name', 'Debian'),
             memory_mb=memory_mb,
@@ -121,15 +128,14 @@ resource "aws_lightsail_static_ip_attachment" "server" {
             hostname=self.profile.get('network', {}).get('hostname', 'server'),
             listening_ports=self.profile.get('network', {}).get('listening_ports', [22, 80, 443])
         )
-        
+
         with open(self.output_dir / 'main.tf', 'w') as f:
             f.write(content)
-    
+
     def generate_variables_tf(self):
         """Generate variables.tf with configurable parameters."""
         os_info = self.profile.get('os_info', {})
-        hardware = self.profile.get('memory_mb', 512)
-        
+
         template = Template('''# Terraform variables
 
 variable "aws_region" {
@@ -174,11 +180,10 @@ variable "ssh_key_name" {
   default     = "lightsail-key"
 }
 ''')
-        
-        # Determine blueprint ID
+
         os_name = os_info.get('name', '').lower()
         os_version = os_info.get('version_id', '')
-        
+
         if 'debian' in os_name:
             if '11' in os_version:
                 blueprint_id = 'debian_11'
@@ -190,21 +195,20 @@ variable "ssh_key_name" {
             blueprint_id = 'ubuntu_22_04'
         else:
             blueprint_id = 'debian_11'
-        
+
         content = template.render(
             hostname=self.profile.get('network', {}).get('hostname', 'server'),
             blueprint_id=blueprint_id,
-            bundle_id=self._get_lightsail_bundle(self.profile.get('hardware', {}).get('memory_mb', 512))
+            bundle_id=self._get_lightsail_bundle(
+                self.profile.get('hardware', {}).get('memory_mb', 512)
+            )
         )
-        
+
         with open(self.output_dir / 'variables.tf', 'w') as f:
             f.write(content)
-    
+
     def generate_provisioner_tf(self):
         """Generate provisioner configuration for software installation."""
-        services = self.profile.get('services', [])
-        software = self.profile.get('software', {})
-        
         template = Template('''# Provisioner configuration using remote-exec
 # This runs after the instance is created
 
@@ -213,7 +217,7 @@ resource "null_resource" "provisioner" {
 
   connection {
     type        = "ssh"
-    user        = "admin"  # Default for Debian on Lightsail
+    user        = "admin"
     host        = aws_lightsail_instance.server.public_ip_address
     private_key = file("~/.ssh/${var.ssh_key_name}.pem")
   }
@@ -235,18 +239,16 @@ resource "null_resource" "provisioner" {
   }
 }
 ''')
-        
+
         config_files = []
-        # Collect important config files to replicate
-        # This would be expanded based on detected services
-        
+
         content = template.render(
             config_files=config_files
         )
-        
+
         with open(self.output_dir / 'provisioner.tf', 'w') as f:
             f.write(content)
-    
+
     def generate_outputs_tf(self):
         """Generate outputs.tf for instance information."""
         content = '''# Terraform outputs
@@ -281,26 +283,25 @@ output "ssh_connection" {
   value       = "ssh admin@${aws_lightsail_instance.server.public_ip_address}"
 }
 '''
-        
+
         with open(self.output_dir / 'outputs.tf', 'w') as f:
             f.write(content)
-    
+
     def generate_startup_script(self):
         """Generate startup.sh user data script."""
         packages = self.profile.get('packages', [])
         software = self.profile.get('software', {})
         services = self.profile.get('services', [])
-        
-        # Filter to essential packages only (avoid system packages)
+
         essential_packages = []
-        common_packages = ['nginx', 'apache2', 'mysql-server', 'postgresql', 
-                          'redis-server', 'docker.io', 'git', 'curl', 'wget',
-                          'python3', 'python3-pip', 'nodejs', 'npm']
-        
+        common_packages = ['nginx', 'apache2', 'mysql-server', 'postgresql',
+                           'redis-server', 'docker.io', 'git', 'curl', 'wget',
+                           'python3', 'python3-pip', 'nodejs', 'npm']
+
         for pkg in packages:
             if pkg in common_packages:
                 essential_packages.append(pkg)
-        
+
         template = Template('''#!/bin/bash
 # Startup script for Lightsail instance
 # Auto-generated from server profile
@@ -345,42 +346,41 @@ useradd -m -s {{ user.shell }} -u {{ user.uid }} {{ user.username }} || true
 
 echo "Server setup complete!"
 ''')
-        
+
         firewall = self.profile.get('firewall', {})
-        
+
         content = template.render(
-            essential_packages=essential_packages[:20],  # Limit to avoid huge script
+            essential_packages=essential_packages[:20],
             software=software,
             firewall_type=firewall.get('type'),
             firewall_rules=firewall.get('rules', []),
             users=self.profile.get('users', [])
         )
-        
+
         with open(self.output_dir / 'startup.sh', 'w') as f:
             f.write(content)
-        
-        # Make executable
+
         os.chmod(self.output_dir / 'startup.sh', 0o755)
-    
+
     def _get_lightsail_bundle(self, memory_mb: int) -> str:
         """
         Map memory size to Lightsail bundle ID.
-        
+
         Args:
             memory_mb: Memory in megabytes
-            
+
         Returns:
             Lightsail bundle ID
         """
         if memory_mb <= 512:
-            return "nano_3_0"  # 512 MB, 1 vCPU
+            return "nano_3_0"
         elif memory_mb <= 1024:
-            return "micro_3_0"  # 1 GB, 1 vCPU
+            return "micro_3_0"
         elif memory_mb <= 2048:
-            return "small_3_0"  # 2 GB, 1 vCPU
+            return "small_3_0"
         elif memory_mb <= 4096:
-            return "medium_3_0"  # 4 GB, 2 vCPU
+            return "medium_3_0"
         elif memory_mb <= 8192:
-            return "large_3_0"  # 8 GB, 2 vCPU
+            return "large_3_0"
         else:
-            return "xlarge_3_0"  # 16 GB, 4 vCPU
+            return "xlarge_3_0"

@@ -1,53 +1,96 @@
 # Server Profiler & Terraform Generator
 
-A service that connects to a remote server, profiles its configuration, and generates Terraform scripts to recreate it.
+Profile remote servers and generate Terraform infrastructure-as-code.
 
-## Features
-
-- SSH connection to remote servers
-- Comprehensive server profiling:
-  - OS and distribution details
-  - Installed packages
-  - Running services
-  - Network configuration
-  - Firewall rules
-  - Storage and volumes
-  - User accounts
-  - Cron jobs
-  - Key configuration files
-- Terraform code generation
+[![Tests](https://github.com/your-org/server-profiler/actions/workflows/test.yml/badge.svg)](https://github.com/your-org/server-profiler/actions)
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ## Usage
 
-### Basic profiling
+### Profile a remote server
 
 ```bash
-python profiler.py --host <hostname> --user <username> --key <path-to-key>
+server-profiler profile --host example.com --user admin --key ~/.ssh/id_rsa
 ```
 
-### Generate Terraform
+### Profile using Lightsail SSH config
 
 ```bash
-python profiler.py --host <hostname> --user <username> --key <path-to-key> --terraform
+server-profiler profile --lightsail-config ~/.ssh/lightsail-ssh-config --instance-name my-server
 ```
 
-### Example Using Lightsail SSH config
+### Profile only (skip Terraform generation)
 
 ```bash
-python profiler.py --lightsail-config ~/.ssh/lightsail-config --instance-name <instance-name>
+server-profiler profile --host example.com --key ~/.ssh/id_rsa --no-terraform
 ```
 
-## Output
+### Regenerate Terraform from existing profile
 
-- `profile.json` - Complete server profile
-- `terraform/` - Generated Terraform configuration
-  - `main.tf` - Instance configuration
-  - `provisioner.tf` - Software and configuration provisioning
-  - `variables.tf` - Terraform variables
-  - `outputs.tf` - Terraform outputs
+```bash
+server-profiler terraform --input profile.json
+```
+
+### Show version
+
+```bash
+server-profiler --version
+```
+
+## Command Reference
+
+### `server-profiler profile`
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--host` | — | Remote server hostname or IP |
+| `--user` | `admin` | SSH username |
+| `--key` | — | Path to SSH private key |
+| `--password` | — | SSH password |
+| `--port` | `22` | SSH port |
+| `--lightsail-config` | — | Path to Lightsail SSH config |
+| `--instance-name` | — | Instance name in Lightsail config |
+| `--terraform/--no-terraform` | `True` | Generate Terraform config |
+| `--output` | `profile.json` | Profile output file |
+| `--terraform-dir` | `terraform` | Terraform output directory |
+| `-v, --verbose` | — | Show detailed progress |
+
+### `server-profiler terraform`
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-i, --input` | `profile.json` | Input profile JSON |
+| `--terraform-dir` | `terraform` | Terraform output directory |
+| `-v, --verbose` | — | Show detailed progress |
+
+## Outputs
+
+- `profile.json` — Complete server profile
+- `terraform/` — Generated Terraform configuration
+  - `main.tf` — Lightsail instance and networking
+  - `variables.tf` — Configurable parameters
+  - `provisioner.tf` — Remote-exec provisioning
+  - `outputs.tf` — Instance outputs
+  - `startup.sh` — User data bootstrap script
+
+## Development
+
+```bash
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+python -m pytest tests/ -v
+
+# Run tests with coverage
+python -m pytest tests/ --cov=.
+```
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
